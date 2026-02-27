@@ -40,7 +40,6 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild clean archive \
-            -workspace Cryptomator.xcworkspace \
             -scheme Cryptomator \
             -configuration Release \
             -archivePath $PWD/build/Cryptomator.xcarchive \
