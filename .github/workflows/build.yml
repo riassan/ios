@@ -22,11 +22,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-spm-
 
-      - name: Run process.sh script
-        run: |
-          ./Scripts/process.sh
-          exit $?
-
       - name: Inject Dummy CloudAccessSecrets
         run: |
           export BOX_CLIENT_ID="dummy_key"
