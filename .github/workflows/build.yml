@@ -1,60 +1,68 @@
-name: Build
+name: Build Cryptomator Premium IPA
 
 on:
-  push:
-  pull_request_target:
-    types: [labeled]
+  workflow_dispatch: 
 
 jobs:
   build:
-    name: Build and test
-    runs-on: [self-hosted, macOS, ARM64]
-    env:
-      DERIVED_DATA_PATH: 'DerivedData'
-      DEVICE: 'iPhone 17 Pro'
-    strategy:
-      matrix:
-        config: ['freemium', 'premium']
+    name: Build iOS IPA
+    runs-on: macos-14 
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
         with:
-          # Disable shallow clone for SonarCloud analysis
-          # https://docs.sonarsource.com/sonarqube-cloud/advanced-setup/ci-based-analysis/github-actions-for-sonarcloud
           fetch-depth: 0
-      - uses: actions/cache@v4
+
+      - name: Setup Cache
+        uses: actions/cache@v4
         with:
           path: .build
           key: ${{ runner.os }}-spm-${{ hashFiles('**/Package.resolved') }}
           restore-keys: |
             ${{ runner.os }}-spm-
+
       - name: Run process.sh script
         run: |
           ./Scripts/process.sh
           exit $?
-      - name: Create CloudAccessSecrets
+
+      - name: Inject Dummy CloudAccessSecrets
         run: |
+          export BOX_CLIENT_ID="dummy_key"
+          export BOX_CLIENT_SECRET="dummy_key"
+          export DROPBOX_APP_KEY="dummy_key"
+          export GOOGLE_DRIVE_CLIENT_ID="dummy_key"
+          export GOOGLE_DRIVE_REDIRECT_URL_SCHEME="dummy_key"
+          export MICROSOFT_GRAPH_CLIENT_ID="dummy_key"
+          export MICROSOFT_GRAPH_REDIRECT_URI_SCHEME="dummy_key"
+          export PCLOUD_APP_KEY="dummy_key"
+          
           cd fastlane
           ./scripts/create-cloud-access-secrets.sh
-      - name: Configuration for freemium
-        if: ${{ matrix.config == 'freemium' }}
+
+      - name: Build and Archive
         run: |
-          echo "BUILD_CMD=-enableCodeCoverage YES" >> $GITHUB_ENV
-      - name: Configuration for premium
-        if: ${{ matrix.config == 'premium' }}
+          set -o pipefail
+          xcodebuild clean archive \
+            -workspace Cryptomator.xcworkspace \
+            -scheme Cryptomator \
+            -configuration Release \
+            -archivePath $PWD/build/Cryptomator.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            SWIFT_ACTIVE_COMPILATION_CONDITIONS="\$(inherited) ALWAYS_PREMIUM" | xcbeautify
+
+      - name: Package IPA
         run: |
-          echo "BUILD_CMD=SWIFT_ACTIVE_COMPILATION_CONDITIONS='\$(inherited) ALWAYS_PREMIUM'" >> $GITHUB_ENV
-      - name: Build
-        run: set -o pipefail && env NSUnbufferedIO=YES xcodebuild clean build-for-testing -scheme 'AllTests' -destination "name=$DEVICE" -derivedDataPath $DERIVED_DATA_PATH ${{ env.BUILD_CMD }} | xcbeautify
-      - name: Test
-        run: set -o pipefail && env NSUnbufferedIO=YES xcodebuild test-without-building -xctestrun $(find . -type f -name "*.xctestrun") -destination "name=$DEVICE" -derivedDataPath $DERIVED_DATA_PATH | xcbeautify
-      - name: Generate coverage report
-        if: ${{ matrix.config == 'freemium' }}
-        run: |
-          xcresult_path=$(find $DERIVED_DATA_PATH/Logs/Test -name "*.xcresult" | head -n 1)
-          bash Scripts/xccov-to-sonarqube-generic.sh "$xcresult_path" > sonarqube-generic-coverage.xml
-      - name: SonarCloud Scan
-        if: ${{ matrix.config == 'freemium' }}
-        uses: SonarSource/sonarqube-scan-action@v6.0.0
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        continue-on-error: true
+          mkdir -p Payload
+          mv build/Cryptomator.xcarchive/Products/Applications/Cryptomator.app Payload/
+          zip -qr9 Cryptomator-Premium.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cryptomator-Premium
+          path: Cryptomator-Premium.ipa
